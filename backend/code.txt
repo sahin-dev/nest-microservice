@@ -1,0 +1,153 @@
+import { ClientProxyFactory, Transport } from '@nestjs/microservices';
+
+export const rabbitMQClient = ClientProxyFactory.create({
+  transport: Transport.RMQ,
+  options: {
+    urls: ['amqp://localhost:5672'],
+    queue: 'task_events',
+    queueOptions: { durable: true },
+  },
+});
+
+
+
+
+rabbitMQClient.emit('task.updated', {
+  taskId: '123',
+  status: 'Completed',
+});
+
+
+import { Controller, OnModuleInit } from '@nestjs/common';
+import { MessagePattern } from '@nestjs/microservices';
+
+@Controller()
+export class NotificationController implements OnModuleInit {
+  
+  @MessagePattern('task.updated')
+  handleTaskUpdate(data: any) {
+    console.log(`Task ${data.taskId} status changed to ${data.status}`);
+    // Send email or push notification here
+  }
+}
+
+
+docker-compose up --build
+
+
+docker run --name redis -p 6379:6379 -d redis
+
+docker exec -it redis redis-cli
+
+npm install ioredis @nestjs/cache-manager
+
+
+import { Injectable } from '@nestjs/common';
+import Redis from 'ioredis';
+
+@Injectable()
+export class CacheService {
+  private redisClient: Redis;
+
+  constructor() {
+    this.redisClient = new Redis({ host: 'localhost', port: 6379 });
+  }
+
+  async setCache(key: string, value: any, ttl = 3600) {
+    await this.redisClient.set(key, JSON.stringify(value), 'EX', ttl);
+  }
+
+  async getCache(key: string) {
+    const data = await this.redisClient.get(key);
+    return data ? JSON.parse(data) : null;
+  }
+
+  async deleteCache(key: string) {
+    await this.redisClient.del(key);
+  }
+}
+
+
+async getTask(taskId: string) {
+  const cachedTask = await this.cacheService.getCache(`task:${taskId}`);
+  if (cachedTask) return cachedTask;
+
+  const task = await this.taskRepository.findOne(taskId);
+  await this.cacheService.setCache(`task:${taskId}`, task);
+  return task;
+}
+
+
+await this.cacheService.deleteCache(`task:${taskId}`);
+
+
+docker-compose up --build
+
+
+GET /api/users → API Gateway → user-service
+
+
+nest new api-gateway
+cd api-gateway
+npm install @nestjs/microservices @nestjs/config
+
+
+import { NestFactory } from '@nestjs/core';
+import { Transport, MicroserviceOptions } from '@nestjs/microservices';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.RMQ,
+    options: {
+      urls: ['amqp://localhost:5672'],
+      queue: 'gateway_queue',
+      queueOptions: { durable: true },
+    },
+  });
+
+  await app.startAllMicroservices();
+  await app.listen(4000);
+}
+bootstrap();
+
+
+import { Controller, Get } from '@nestjs/common';
+import { ClientProxyFactory, Transport } from '@nestjs/microservices';
+
+@Controller('users')
+export class UserController {
+  private client = ClientProxyFactory.create({
+    transport: Transport.RMQ,
+    options: { urls: ['amqp://localhost:5672'], queue: 'user_service' },
+  });
+
+  @Get()
+  async getUsers() {
+    return this.client.send({ cmd: 'get_users' }, {});
+  }
+}
+
+
+import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import * as jwt from 'jsonwebtoken';
+
+@Injectable()
+export class AuthGuard implements CanActivate {
+  canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest();
+    const token = req.headers.authorization?.split(' ')[1];
+
+    try {
+      const decoded = jwt.verify(token, 'SECRET_KEY');
+      req.user = decoded;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+
+docker-compose up --build
